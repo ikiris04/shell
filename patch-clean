@@ -1,0 +1,178 @@
+HOSTNAME=`hostname`
+HOSTSHORT=$(echo $HOSTNAME | awk -F. '{print $1}')
+DNSDOMAIN=$(echo $HOSTNAME | awk -F'.' '{print $2}')
+HOSTIP=`esxcli network ip interface  ipv4 get | grep vmk0 | awk '{print $2}'`
+if [ "$DNSDOMAIN"  = "" ]; then
+	#this means hostname was short, not FQDN
+	HOSTNAME=`nslookup $HOSTIP | grep $HOSTIP | grep Address | awk '{print $4}'`
+	HOSTSHORT=$(echo $HOSTNAME | awk -F. '{print $1}')
+	DNSDOMAIN=$(echo $HOSTNAME | awk -F'.' '{print $2}')
+fi
+
+
+PRODUCT=`smbiosDump | grep Product: |  sort -u | awk '{print $2$3$4}'|sed s#\"##g`
+if [ $PRODUCT == "ProLiantBL460cGen8" ]; then
+	#check processor
+	smbiosDump | grep Version | sort -u | grep CPU | grep v2 > /dev/null
+	if [ $? -eq 0 ]; then
+		PRODUCT="ProLiantBL460cGen8v2"
+	fi
+
+fi
+
+PROFILENAME=HPE-ESXi-6.0.0-Update3
+
+YEAR=2017
+KSERVER=mywebserver.fqdn
+
+case $PRODUCT in
+	ProLiantBL460cG7)	
+		echo $PRODUCT
+		BIOS=CP028127
+		ARRAY=CP027482
+		NIC=CP031843
+		ILO=CP029098
+
+	;;
+	ProLiantBL460cGen8)
+		echo $PRODUCT
+		BIOS=CP027282
+		ARRAY=CP030723
+		NIC=CP031843
+		ILO=CP027910
+
+	;;
+	ProLiantBL460cGen8v2)
+		echo $PRODUCT
+		BIOS=CP027282
+		ARRAY=CP030723
+		NIC=CP028018
+		ILO=CP027910
+
+	;;
+	ProLiantBL460cGen9)
+		echo $PRODUCT
+		BIOS=CP031702
+		ARRAY=CP032042
+		NIC=CP031843
+		ILO=CP027910
+	;;
+	ProLiantDL380Gen8)
+	#this assumes v2
+		echo $PRODUCT
+		BIOS=CP027724
+		ARRAY=CP030723
+		NIC=CP028018
+		ILO=CP027910
+
+	;;
+	ProLiantDL380Gen9)
+		echo $PRODUCT
+		BIOS=CP031674
+		ARRAY=CP032042
+		NIC=CP028018
+		ILO=CP027910
+
+	;;
+	*)
+		echo "unknown"
+		exit 1
+	;;
+esac
+
+
+
+
+mkdir /tmp/scratch/firmware
+cd /tmp/scratch/firmware
+date
+echo "copying bios"
+
+wget http://${KSERVER}/${YEAR}/${BIOS}.zip
+echo "Unzipping BIOS"
+unzip ${BIOS}.zip
+echo "Patching BIOS"
+chmod a+x ${BIOS}.vmexe
+echo y|./${BIOS}.vmexe
+echo "Cleanup BIOS Files"
+rm /tmp/scratch/firmware/*.*
+
+
+echo "Copying Array"
+wget http://${KSERVER}/${YEAR}/${ARRAY}.zip
+echo "Unzipping Array"
+unzip ${ARRAY}.zip
+echo "Patching Array"
+chmod a+x ${ARRAY}.vmexe
+echo A|./${ARRAY}.vmexe
+echo "Cleanup Array Files"
+rm /tmp/scratch/firmware/*.*
+
+echo "Copying Nic"
+wget http://${KSERVER}/${YEAR}/${NIC}.zip
+echo "Unzipping Nic"
+unzip ${NIC}.zip
+echo "Patching Nic"
+chmod a+x ${NIC}.vmexe
+./${NIC}.vmexe << EOF
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+EOF
+echo "cleanup nic"
+rm /tmp/scratch/firmware/*.*
+
+echo "Copying IlO"
+wget http://${KSERVER}/${YEAR}/${ILO}.zip
+echo "Unzip ILO"
+unzip ${ILO}.zip
+echo "Patching ILO"
+chmod a+x ${ILO}.vmexe
+echo y|./${ILO}.vmexe
+echo "Cleanup ILO"
+rm /tmp/scratch/firmware/*.*
+
+
+
+
+# put in any settings you want here
+#sets Shell Service Timeout to 900 Secs
+esxcli system settings advanced set -o /UserVars/ESXiShellTimeOut -i 900
+
+#Sets Interactive Shell Service Timeout to 900 Secs
+esxcli system settings advanced set -o /UserVars/ESXiShellInteractiveTimeOut -i 900
+
+/sbin/auto-backup.sh
+
+
+echo "Patching OS"
+esxcli software profile update -p ${PROFILENAME} -d http://${KSERVER}/${YEAR}/esxi/
+
+##-----
+## ILO
+##------
+
+/opt/hp/tools/hponcfg -i <<EOF
+<RIBCL VERSION="2.0">
+   <LOGIN USER_LOGIN="adminname" PASSWORD="password">
+   </LOGIN>
+</RIBCL>
+EOF
+
+echo "complete, please reboot"
+date
